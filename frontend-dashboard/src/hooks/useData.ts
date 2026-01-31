@@ -5,12 +5,7 @@ import type {
   FundingRate,
   OpportunityQueryParams
 } from '../types';
-import {
-  getLatestOpportunities,
-  getStatistics,
-  getLatestFundingRates,
-  getOpportunities
-} from '../api/client';
+import { apiClient } from '../api/client';
 
 /**
  * 使用套利机会数据
@@ -25,8 +20,8 @@ export function useOpportunities(autoRefresh: boolean = true, interval: number =
       setLoading(true);
       setError(null);
       const data = params 
-        ? await getOpportunities(params)
-        : await getLatestOpportunities(20);
+        ? await apiClient.getOpportunities(params)
+        : await apiClient.getLatestOpportunities(20);
       setOpportunities(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch opportunities');
@@ -64,7 +59,7 @@ export function useStatistics(hours: number = 24, autoRefresh: boolean = true) {
     try {
       setLoading(true);
       setError(null);
-      const data = await getStatistics({ hours });
+      const data = await apiClient.getStatistics({ hours });
       setStatistics(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch statistics');
@@ -102,7 +97,7 @@ export function useFundingRates(limit: number = 100) {
     try {
       setLoading(true);
       setError(null);
-      const data = await getLatestFundingRates(limit);
+      const data = await apiClient.getLatestFundingRates(limit);
       setFundingRates(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch funding rates');

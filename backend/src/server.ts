@@ -2,6 +2,7 @@ import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import statsRouter from './routes/stats';
+import exchangesRouter from './routes/exchanges';
 import DatabaseService from './database/service';
 
 // 加载环境变量
@@ -52,6 +53,7 @@ export class ApiServer {
   private setupRoutes(): void {
     // API 路由（带 /api 前缀）
     this.app.use('/api', statsRouter);
+    this.app.use('/api', exchangesRouter);
     // 无前缀路由（/opportunities、/statistics 等也可直接访问）
     this.app.use('/', statsRouter);
 
@@ -67,7 +69,13 @@ export class ApiServer {
           latestFundingRates: '/api/funding-rates/latest',
           fundingRateHistory: '/api/funding-rates/history',
           statistics: '/api/statistics',
-          health: '/api/health'
+          health: '/api/health',
+          // 交易所 API 端点
+          exchanges: {
+            binance: '/api/exchanges/binance',
+            bybit: '/api/exchanges/bybit',
+            okx: '/api/exchanges/okx',
+          }
         }
       });
     });

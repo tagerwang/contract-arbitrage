@@ -97,6 +97,7 @@ export default function APIExplorer() {
             ) : (
               <APIDetail 
                 api={selectedAPI} 
+                exchange={selectedExchange}
                 onBack={() => setSelectedAPI(null)} 
               />
             )}

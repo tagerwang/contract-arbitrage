@@ -1,5 +1,15 @@
 import axios, { AxiosInstance } from 'axios';
+import crypto from 'crypto';
 import { Exchange, FundingRate, OrderBook, Kline } from '../types';
+
+/** 下单参数 */
+export interface PlaceOrderParams {
+  symbol: string;
+  side: 'Buy' | 'Sell';
+  orderType: 'Market' | 'Limit';
+  qty: string;
+  price?: string;
+}
 
 /**
  * Bybit交易所API封装
@@ -7,8 +17,12 @@ import { Exchange, FundingRate, OrderBook, Kline } from '../types';
 export class BybitAPI {
   private client: AxiosInstance;
   private wsUrl: string;
+  private apiKey?: string;
+  private apiSecret?: string;
 
   constructor() {
+    this.apiKey = process.env.BYBIT_API_KEY;
+    this.apiSecret = process.env.BYBIT_API_SECRET;
     this.client = axios.create({
       baseURL: 'https://api.bybit.com',
       timeout: 10000,
@@ -198,6 +212,54 @@ export class BybitAPI {
         .map((inst: any) => inst.symbol);
     } catch (error) {
       throw new Error(`Bybit getSymbols error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 下单（需要配置 BYBIT_API_KEY、BYBIT_API_SECRET）
+   */
+  async placeOrder(params: PlaceOrderParams): Promise<any> {
+    if (!this.apiKey || !this.apiSecret) {
+      throw new Error('未配置 BYBIT_API_KEY 或 BYBIT_API_SECRET');
+    }
+
+    const recvWindow = 5000;
+    const timestamp = Date.now().toString();
+    const body: Record<string, string> = {
+      category: 'linear',
+      symbol: params.symbol,
+      side: params.side,
+      orderType: params.orderType,
+      qty: params.qty
+    };
+    if (params.orderType === 'Limit' && params.price) {
+      body.price = params.price;
+    }
+
+    const bodyStr = JSON.stringify(body);
+    const signPayload = timestamp + this.apiKey + recvWindow + bodyStr;
+    const signature = crypto
+      .createHmac('sha256', this.apiSecret)
+      .update(signPayload)
+      .digest('hex');
+
+    try {
+      const response = await this.client.post('/v5/order/create', body, {
+        headers: {
+          'X-BAPI-API-KEY': this.apiKey,
+          'X-BAPI-TIMESTAMP': timestamp,
+          'X-BAPI-SIGN': signature,
+          'X-BAPI-RECV-WINDOW': String(recvWindow)
+        }
+      });
+
+      if (response.data.retCode !== 0) {
+        throw new Error(response.data.retMsg || 'Unknown error');
+      }
+      return response.data.result;
+    } catch (error: any) {
+      const msg = error.response?.data?.retMsg ?? error.message;
+      throw new Error(`Bybit placeOrder error: ${msg}`);
     }
   }
 

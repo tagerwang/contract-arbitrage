@@ -1,5 +1,17 @@
 import axios, { AxiosInstance } from 'axios';
+import crypto from 'crypto';
 import { Exchange, FundingRate, OrderBook, Kline } from '../types';
+
+/** 下单参数 */
+export interface PlaceOrderParams {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  type: 'MARKET' | 'LIMIT';
+  quantity: string;
+  price?: string;
+  /** 持仓方向: BOTH=单向, LONG=双向做多, SHORT=双向做空。不传时根据 BINANCE_DUAL_POSITION 自动推断 */
+  positionSide?: 'BOTH' | 'LONG' | 'SHORT';
+}
 
 /**
  * 币安交易所API封装
@@ -7,8 +19,12 @@ import { Exchange, FundingRate, OrderBook, Kline } from '../types';
 export class BinanceAPI {
   private client: AxiosInstance;
   private wsUrl: string;
+  private apiKey?: string;
+  private apiSecret?: string;
 
   constructor() {
+    this.apiKey = process.env.BINANCE_API_KEY?.trim();
+    this.apiSecret = process.env.BINANCE_API_SECRET?.trim();
     this.client = axios.create({
       baseURL: 'https://fapi.binance.com',
       timeout: 10000,
@@ -191,6 +207,76 @@ export class BinanceAPI {
       return parseFloat(response.data.price);
     } catch (error) {
       throw new Error(`Binance getPrice error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 下单（需要配置 BINANCE_API_KEY、BINANCE_API_SECRET）
+   */
+  async placeOrder(params: PlaceOrderParams): Promise<any> {
+    if (!this.apiKey || !this.apiSecret) {
+      throw new Error('未配置 BINANCE_API_KEY 或 BINANCE_API_SECRET');
+    }
+
+    const timestamp = Date.now();
+
+    // positionSide: 显式传入 > 环境变量 BINANCE_DUAL_POSITION > 默认 BOTH
+    let positionSide = params.positionSide;
+    if (!positionSide) {
+      positionSide = process.env.BINANCE_DUAL_POSITION === 'true'
+        ? (params.side === 'BUY' ? 'LONG' : 'SHORT')
+        : 'BOTH';
+    }
+
+    const isLimitOrder = params.type.toUpperCase() === 'LIMIT';
+
+    const orderParams: Record<string, string> = {
+      symbol: params.symbol,
+      side: params.side,
+      type: params.type,
+      quantity: params.quantity,
+      positionSide,
+      recvWindow: '60000',
+      timestamp: String(timestamp)
+    };
+
+    // 限价单必须带 timeInForce（如 GTC），否则币安报 -1102
+    if (isLimitOrder) {
+      orderParams.timeInForce = 'GTC';
+      if (params.price) orderParams.price = params.price;
+    }
+
+    // 与 quick-trade.sh 一致的参数顺序构建 queryString
+    const paramOrder = ['positionSide', 'quantity', 'recvWindow', 'side', 'symbol', 'timestamp', 'type', 'timeInForce', 'price'];
+    const queryString = paramOrder
+      .filter(k => orderParams[k] !== undefined)
+      .map(k => `${k}=${orderParams[k]}`)
+      .join('&');
+
+    const signature = crypto
+      .createHmac('sha256', this.apiSecret)
+      .update(queryString)
+      .digest('hex');
+
+    // 使用 request body 而非 URL，避免 axios/HTTP 层对 URL 的编码干扰
+    const body = `${queryString}&signature=${signature}`;
+
+    try {
+      const response = await this.client.post(
+        '/fapi/v1/order',
+        body,
+        {
+          headers: {
+            'X-MBX-APIKEY': this.apiKey,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        }
+      );
+      return response.data;
+    } catch (error: any) {
+      throw new Error(
+        `Binance placeOrder error: ${error.response?.data?.msg ?? error.message}`
+      );
     }
   }
 

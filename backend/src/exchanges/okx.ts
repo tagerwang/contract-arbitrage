@@ -1,5 +1,18 @@
 import axios, { AxiosInstance } from 'axios';
+import crypto from 'crypto';
 import { Exchange, FundingRate, OrderBook, Kline } from '../types';
+
+/** 下单参数 */
+export interface PlaceOrderParams {
+  instId: string;      // 如 BTC-USDT-SWAP
+  tdMode: string;      // cross | isolated
+  side: 'buy' | 'sell';
+  ordType: 'market' | 'limit';
+  sz: string;
+  px?: string;         // 限价单价格
+  /** 持仓方向：long/short（双向持仓）或 net（单向持仓）。不传则按 side 推断 */
+  posSide?: 'long' | 'short' | 'net';
+}
 
 /**
  * OKX交易所API封装
@@ -7,8 +20,14 @@ import { Exchange, FundingRate, OrderBook, Kline } from '../types';
 export class OKXAPI {
   private client: AxiosInstance;
   private wsUrl: string;
+  private apiKey?: string;
+  private apiSecret?: string;
+  private passphrase?: string;
 
   constructor() {
+    this.apiKey = process.env.OKX_API_KEY;
+    this.apiSecret = process.env.OKX_API_SECRET;
+    this.passphrase = process.env.OKX_PASSPHRASE;
     this.client = axios.create({
       baseURL: 'https://www.okx.com',
       timeout: 10000,
@@ -198,9 +217,70 @@ export class OKXAPI {
 
       return response.data.data
         .filter((inst: any) => inst.state === 'live' && inst.instId.endsWith('-SWAP'))
-        .map((inst: any) => this.denormalizeSymbol(inst.instId));
+        .map((inst: any) => inst.instId);
     } catch (error) {
       throw new Error(`OKX getSymbols error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * 下单（需要配置 OKX_API_KEY、OKX_API_SECRET、OKX_PASSPHRASE）
+   */
+  async placeOrder(params: PlaceOrderParams): Promise<any> {
+    if (!this.apiKey || !this.apiSecret || !this.passphrase) {
+      throw new Error('未配置 OKX_API_KEY、OKX_API_SECRET 或 OKX_PASSPHRASE');
+    }
+
+    const instId = params.instId.includes('-') ? params.instId : this.normalizeSymbol(params.instId);
+    const posSide = params.posSide ?? (params.side === 'buy' ? 'long' : 'short');
+    const body: Record<string, string> = {
+      instId,
+      tdMode: params.tdMode,
+      side: params.side,
+      ordType: params.ordType,
+      sz: params.sz,
+      posSide
+    };
+    if (params.ordType === 'limit' && params.px) {
+      body.px = params.px;
+    }
+
+    const method = 'POST';
+    const requestPath = '/api/v5/trade/order';
+    const bodyStr = JSON.stringify(body);
+    const timestamp = new Date().toISOString();
+    const prehash = timestamp + method + requestPath + bodyStr;
+    const sign = crypto
+      .createHmac('sha256', this.apiSecret)
+      .update(prehash)
+      .digest('base64');
+
+    try {
+      const response = await this.client.post(requestPath, body, {
+        headers: {
+          'OK-ACCESS-KEY': this.apiKey,
+          'OK-ACCESS-SIGN': sign,
+          'OK-ACCESS-TIMESTAMP': timestamp,
+          'OK-ACCESS-PASSPHRASE': this.passphrase
+        }
+      });
+
+      if (response.data.code !== '0') {
+        const firstErr = response.data.data?.[0];
+        const detail = firstErr?.sMsg || firstErr?.sCode
+          ? `[${firstErr.sCode || ''}] ${firstErr.sMsg || ''}`.trim()
+          : response.data.msg;
+        throw new Error(detail || 'All operations failed');
+      }
+      return response.data.data?.[0] ?? response.data;
+    } catch (error: any) {
+      const data = error.response?.data;
+      const firstErr = data?.data?.[0];
+      const detail = firstErr?.sMsg || firstErr?.sCode
+        ? `[${firstErr.sCode || ''}] ${firstErr.sMsg || ''}`.trim()
+        : data?.msg;
+      const msg = detail || error.message || 'All operations failed';
+      throw new Error(`OKX placeOrder error: ${msg}`);
     }
   }
 

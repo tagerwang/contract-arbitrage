@@ -115,11 +115,12 @@ export const API_CATALOG: Record<string, ExchangeConfig> = {
         endpoint: '/fapi/v1/order',
         description: '创建新订单',
         params: [
-          { name: 'symbol', required: true, type: 'string', desc: '交易对' },
-          { name: 'side', required: true, type: 'enum', desc: 'BUY或SELL' },
-          { name: 'type', required: true, type: 'enum', desc: '订单类型:LIMIT,MARKET等' },
-          { name: 'quantity', required: true, type: 'decimal', desc: '下单数量' },
-          { name: 'price', required: false, type: 'decimal', desc: '委托价格' }
+          { name: 'symbol', required: true, type: 'string', desc: '交易对,如BTCUSDT' },
+          { name: 'side', required: true, type: 'string', desc: 'BUY或SELL' },
+          { name: 'type', required: true, type: 'string', desc: '订单类型:LIMIT或MARKET' },
+          { name: 'quantity', required: true, type: 'string', desc: '下单数量' },
+          { name: 'positionSide', required: false, type: 'string', desc: 'BOTH=单向持仓, LONG=双向做多, SHORT=双向做空。不填则按后端配置' },
+          { name: 'price', required: false, type: 'string', desc: '限价单委托价格' }
         ],
         response: {
           orderId: 123456789,
@@ -227,11 +228,12 @@ export const API_CATALOG: Record<string, ExchangeConfig> = {
         endpoint: '/api/v5/trade/order',
         description: '下单交易',
         params: [
-          { name: 'instId', required: true, type: 'string', desc: '产品ID' },
+          { name: 'instId', required: true, type: 'string', desc: '产品ID,如BTC-USDT-SWAP' },
           { name: 'tdMode', required: true, type: 'string', desc: '交易模式:cross,isolated' },
           { name: 'side', required: true, type: 'string', desc: 'buy或sell' },
           { name: 'ordType', required: true, type: 'string', desc: '订单类型:limit,market' },
-          { name: 'sz', required: true, type: 'string', desc: '委托数量' }
+          { name: 'sz', required: true, type: 'string', desc: '委托数量(张)' },
+          { name: 'px', required: false, type: 'string', desc: '限价单委托价格' }
         ],
         response: {
           ordId: '312269865356374016',
@@ -340,11 +342,11 @@ export const API_CATALOG: Record<string, ExchangeConfig> = {
         endpoint: '/v5/order/create',
         description: '下单交易',
         params: [
-          { name: 'category', required: true, type: 'string', desc: 'linear' },
-          { name: 'symbol', required: true, type: 'string', desc: '交易对' },
+          { name: 'symbol', required: true, type: 'string', desc: '交易对,如BTCUSDT' },
           { name: 'side', required: true, type: 'string', desc: 'Buy或Sell' },
           { name: 'orderType', required: true, type: 'string', desc: 'Market或Limit' },
-          { name: 'qty', required: true, type: 'string', desc: '订单数量' }
+          { name: 'qty', required: true, type: 'string', desc: '订单数量' },
+          { name: 'price', required: false, type: 'string', desc: '限价单委托价格' }
         ],
         response: {
           orderId: '1234567890123456789',

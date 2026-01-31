@@ -11,8 +11,11 @@ import type {
 
 /**
  * API 基础配置
+ * 开发环境优先使用 /api 走 Vite 代理，避免跨域和 404
  */
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? '/api' : 'http://localhost:3001/api');
 
 /**
  * API 客户端类
@@ -122,6 +125,119 @@ class ApiClient {
       return false;
     }
   }
+
+  // ==================== 交易所 API ====================
+
+  /**
+   * 获取指定交易对的资金费率
+   */
+  async getExchangeFundingRate(
+    exchange: string,
+    symbol: string
+  ): Promise<any> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/funding-rate`,
+      { params: { symbol } }
+    );
+    return response.data.data;
+  }
+
+  /**
+   * 获取所有交易对的资金费率
+   */
+  async getExchangeFundingRates(exchange: string): Promise<any[]> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/funding-rates`
+    );
+    return response.data.data || [];
+  }
+
+  /**
+   * 获取订单簿
+   */
+  async getExchangeOrderBook(
+    exchange: string,
+    symbol: string,
+    limit?: number
+  ): Promise<any> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/order-book`,
+      { params: { symbol, limit } }
+    );
+    return response.data.data;
+  }
+
+  /**
+   * 获取K线数据
+   */
+  async getExchangeKlines(
+    exchange: string,
+    symbol: string,
+    interval?: string,
+    limit?: number
+  ): Promise<any[]> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/klines`,
+      { params: { symbol, interval, limit } }
+    );
+    return response.data.data || [];
+  }
+
+  /**
+   * 获取最新价格
+   */
+  async getExchangePrice(exchange: string, symbol: string): Promise<number> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/price`,
+      { params: { symbol } }
+    );
+    return response.data.data?.price || 0;
+  }
+
+  /**
+   * 获取所有支持的交易对
+   */
+  async getExchangeSymbols(exchange: string): Promise<string[]> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/symbols`
+    );
+    return response.data.data?.symbols || [];
+  }
+
+  /**
+   * 获取交易所信息（仅币安）
+   */
+  async getExchangeInfo(exchange: string): Promise<any> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/exchange-info`
+    );
+    return response.data.data;
+  }
+
+  /**
+   * 获取24小时价格变动（仅币安）
+   */
+  async getTicker24hr(exchange: string, symbol: string): Promise<any> {
+    const response = await this.client.get<ApiResponse>(
+      `/exchanges/${exchange}/ticker-24hr`,
+      { params: { symbol } }
+    );
+    return response.data.data;
+  }
+
+  /**
+   * 下单
+   */
+  async placeOrder(
+    exchange: string,
+    params: Record<string, string>
+  ): Promise<any> {
+    const response = await this.client.post<ApiResponse>(
+      `/exchanges/${exchange}/order`,
+      params
+    );
+    return response.data.data;
+  }
 }
 
 // 导出单例
@@ -134,5 +250,14 @@ export const {
   getLatestFundingRates,
   getFundingRateHistory,
   getStatistics,
-  healthCheck
+  healthCheck,
+  // 交易所 API
+  getExchangeFundingRate,
+  getExchangeFundingRates,
+  getExchangeOrderBook,
+  getExchangeKlines,
+  getExchangePrice,
+  getExchangeSymbols,
+  getExchangeInfo,
+  getTicker24hr
 } = apiClient;

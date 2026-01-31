@@ -138,7 +138,7 @@ await db.saveFundingRatesBatch(rates);
 // 查询套利机会
 await db.queryOpportunities({ 
   symbol: 'BTCUSDT', 
-  minSpread: 0.5 
+  minSpread: 0.35 
 });
 
 // 获取统计数据
