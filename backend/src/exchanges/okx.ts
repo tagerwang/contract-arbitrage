@@ -129,6 +129,7 @@ export class OKXAPI {
             symbol: this.denormalizeSymbol(data.instId),
             fundingRate: parseFloat(data.fundingRate),
             fundingTime: parseInt(data.nextFundingTime),
+            // OKX API 无 fundingInterval，不存默认值；年化计算时用 8
             timestamp: parseInt(data.fundingTime)
           };
         } catch {

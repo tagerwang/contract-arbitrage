@@ -14,17 +14,33 @@ export enum Exchange {
 export interface ArbitrageOpportunity {
   id: number;
   symbol: string;
+  /** 做多交易所 */
   long_exchange: string;
+  /** 做空交易所 */
   short_exchange: string;
+  /** 做多费率 */
   long_rate: number;
+  /** 做空费率 */
   short_rate: number;
+  /** 费率差 */
   spread_rate: number;
+  /** 年化收益率 */
   annualized_return: number;
+  /** 下次资金费率结算时间戳（毫秒） */
+  next_funding_time: number;
+  /** 资金费率结算周期（小时），1/4/8 等；无值时年化计算默认用 8 */
+  funding_period_hours?: number | null;
+  /** 做多价格 */
   long_price: number;
+  /** 做空价格 */
   short_price: number;
+  /** 价格差 */
   price_diff: number;
+  /** 价格差百分比 */
   price_spread_percent: number;
+  /** 置信度 */
   confidence: number;
+  /** 检测时间 */
   detected_at: string;
 }
 

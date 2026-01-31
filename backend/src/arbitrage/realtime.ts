@@ -9,6 +9,8 @@ import { fetchAllExchangesFundingRates } from './fundingRatesFetcher';
 
 const MIN_PROFIT_THRESHOLD = parseFloat(process.env.MIN_PROFIT_THRESHOLD || '0.01');
 const MAX_PRICE_SPREAD = 0.5;
+/** 最少交易所数量：2=任意两所即可套利，3=必须三所都有 */
+const MIN_EXCHANGES_FOR_ARBITRAGE = Math.min(3, Math.max(2, parseInt(process.env.MIN_EXCHANGES_FOR_ARBITRAGE || '2', 10)));
 
 export interface RealtimeOpportunityFilter {
   symbol?: string;
@@ -56,8 +58,12 @@ function analyzeRates(rates: FundingRate[], minSpread: number): ArbitrageRecord[
       const priceSpreadPercent = longPrice > 0 ? (priceDiff / longPrice) * 100 : 0;
       if (priceSpreadPercent > MAX_PRICE_SPREAD) continue;
 
-      const annualizedReturn = spreadRate * 3 * 365;
+      const periodH = longRate.fundingIntervalHours ?? shortRate.fundingIntervalHours ?? 8;
+      const settlementsPerDay = 24 / periodH;
+      const annualizedReturn = spreadRate * settlementsPerDay * 365;
       const confidence = calculateConfidence(spreadRate, priceSpreadPercent);
+      const nextFundingTime = Math.min(longRate.fundingTime, shortRate.fundingTime);
+      const periodFromExchange = longRate.fundingIntervalHours ?? shortRate.fundingIntervalHours;
 
       results.push({
         symbol: longRate.symbol,
@@ -67,6 +73,8 @@ function analyzeRates(rates: FundingRate[], minSpread: number): ArbitrageRecord[
         short_rate: shortRate.fundingRate * 100,
         spread_rate: spreadRate,
         annualized_return: annualizedReturn,
+        next_funding_time: nextFundingTime,
+        funding_period_hours: periodFromExchange,
         long_price: longPrice,
         short_price: shortPrice,
         price_diff: priceDiff,
@@ -99,9 +107,17 @@ export async function computeRealtimeOpportunities(
   const okxSymbols = new Set(okxRates.map((r) => r.symbol));
   const bybitSymbols = new Set(bybitRates.map((r) => r.symbol));
 
+  const minEx = MIN_EXCHANGES_FOR_ARBITRAGE;
+  const allSymbols = new Set([...bnSymbols, ...okxSymbols, ...bybitSymbols]);
   const commonSymbols = symbol
-    ? ([symbol].filter((s) => bnSymbols.has(s) && okxSymbols.has(s) && bybitSymbols.has(s)) as string[])
-    : [...bnSymbols].filter((s) => okxSymbols.has(s) && bybitSymbols.has(s));
+    ? ([symbol].filter((s) => {
+        const count = [bnSymbols, okxSymbols, bybitSymbols].filter((set) => set.has(s)).length;
+        return count >= minEx;
+      }) as string[])
+    : [...allSymbols].filter((s) => {
+        const count = [bnSymbols, okxSymbols, bybitSymbols].filter((set) => set.has(s)).length;
+        return count >= minEx;
+      });
 
   const rateMap = new Map<string, FundingRate[]>();
   for (const r of [...binanceRates, ...okxRates, ...bybitRates]) {

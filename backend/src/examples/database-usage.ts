@@ -66,6 +66,8 @@ async function main() {
       shortRate: 0.05,
       spreadRate: 0.04,
       annualizedReturn: 43.8,
+      nextFundingTime: Date.now() + 8 * 3600 * 1000,
+      fundingPeriodHours: 8, // 示例：交易所明确返回时才有值
       longPrice: 50000,
       shortPrice: 50010,
       priceDiff: 10,

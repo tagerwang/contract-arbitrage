@@ -63,17 +63,26 @@ export class BinanceAPI {
 
   /**
    * 批量获取所有交易对的资金费率
+   * 从 fundingInfo 获取 fundingIntervalHours（部分 symbol 有 4h 周期）
    */
   async getAllFundingRates(): Promise<FundingRate[]> {
     try {
-      const response = await this.client.get('/fapi/v1/premiumIndex');
-      const dataList = response.data;
+      const [premiumRes, fundingInfoRes] = await Promise.all([
+        this.client.get('/fapi/v1/premiumIndex'),
+        this.client.get('/fapi/v1/fundingInfo').catch(() => ({ data: [] }))
+      ]);
+      const dataList = premiumRes.data;
+      const intervalMap = new Map<string, number>();
+      (fundingInfoRes.data || []).forEach((d: any) => {
+        intervalMap.set(d.symbol, parseInt(d.fundingIntervalHours, 10) || 8);
+      });
 
       return dataList.map((data: any) => ({
         exchange: Exchange.BINANCE,
         symbol: data.symbol,
         fundingRate: parseFloat(data.lastFundingRate),
         fundingTime: data.nextFundingTime,
+        fundingIntervalHours: intervalMap.get(data.symbol),
         markPrice: parseFloat(data.markPrice),
         indexPrice: parseFloat(data.indexPrice),
         timestamp: data.time || Date.now()

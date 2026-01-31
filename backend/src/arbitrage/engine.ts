@@ -16,7 +16,9 @@ export class ArbitrageEngine {
   private config = {
     checkInterval: parseInt(process.env.CHECK_INTERVAL_MS || '5000'),
     minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD || '0.3'),
-    maxPriceSpread: parseFloat(process.env.MAX_PRICE_SPREAD || '0.5')
+    maxPriceSpread: parseFloat(process.env.MAX_PRICE_SPREAD || '0.5'),
+    /** 最少交易所数量：2=任意两所即可套利，3=必须三所都有 */
+    minExchangesForArbitrage: Math.min(3, Math.max(2, parseInt(process.env.MIN_EXCHANGES_FOR_ARBITRAGE || '2', 10)))
   };
 
   // 统计数据
@@ -43,7 +45,7 @@ export class ArbitrageEngine {
     console.log('🚀 Starting Arbitrage Engine...');
     console.log(`⚙ Check interval: ${this.config.checkInterval}ms`);
     console.log(`⚙ Min profit threshold: ${this.config.minProfitThreshold}%`);
-    console.log('⚙ Symbols: intersection of Binance, OKX, Bybit (no fixed list)');
+    console.log(`⚙ Min exchanges for arbitrage: ${this.config.minExchangesForArbitrage} (${this.config.minExchangesForArbitrage === 3 ? 'all 3' : '2+ exchanges'})`);
 
     this.running = true;
 
@@ -98,8 +100,13 @@ export class ArbitrageEngine {
       const okxSymbols = new Set(okxRates.map((r) => r.symbol));
       const bybitSymbols = new Set(bybitRates.map((r) => r.symbol));
 
-      const commonSymbols = [...bnSymbols].filter((s) => okxSymbols.has(s) && bybitSymbols.has(s));
-      console.log(`  📋 Common symbols (3 exchanges): ${commonSymbols.length}`);
+      const minEx = this.config.minExchangesForArbitrage;
+      const allSymbols = new Set([...bnSymbols, ...okxSymbols, ...bybitSymbols]);
+      const commonSymbols = [...allSymbols].filter((s) => {
+        const count = [bnSymbols, okxSymbols, bybitSymbols].filter((set) => set.has(s)).length;
+        return count >= minEx;
+      });
+      console.log(`  📋 Symbols (≥${minEx} exchanges): ${commonSymbols.length}`);
 
       const rateMap = new Map<string, FundingRate[]>();
       for (const r of [...binanceRates, ...okxRates, ...bybitRates]) {
@@ -201,11 +208,13 @@ export class ArbitrageEngine {
         // 检查价格差是否在合理范围内
         if (priceSpreadPercent > this.config.maxPriceSpread) continue;
 
-        // 计算年化收益率 (假设每8小时结算一次)
-        const annualizedReturn = spreadRate * 3 * 365; // 每天3次，一年365天
+        const periodH = longRate.fundingIntervalHours ?? shortRate.fundingIntervalHours ?? 8;
+        const settlementsPerDay = 24 / periodH;
+        const annualizedReturn = spreadRate * settlementsPerDay * 365;
 
-        // 计算置信度
         const confidence = this.calculateConfidence(spreadRate, priceSpreadPercent);
+        const nextFundingTime = Math.min(longRate.fundingTime, shortRate.fundingTime);
+        const periodFromExchange = longRate.fundingIntervalHours ?? shortRate.fundingIntervalHours;
 
         opportunities.push({
           symbol: longRate.symbol,
@@ -215,6 +224,8 @@ export class ArbitrageEngine {
           shortRate: shortRate.fundingRate * 100,
           spreadRate,
           annualizedReturn,
+          nextFundingTime,
+          fundingPeriodHours: periodFromExchange,
           longPrice,
           shortPrice,
           priceDiff,

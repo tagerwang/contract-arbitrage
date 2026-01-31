@@ -158,9 +158,9 @@ export class DatabaseService {
     const [result] = await this.pool.query<mysql.ResultSetHeader>(
       `INSERT INTO arbitrage_opportunities
        (symbol, long_exchange, short_exchange, long_rate, short_rate,
-        spread_rate, annualized_return, long_price, short_price,
-        price_diff, price_spread_percent, confidence, detected_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        spread_rate, annualized_return, next_funding_time, funding_period_hours,
+        long_price, short_price, price_diff, price_spread_percent, confidence, detected_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         opp.symbol,
         opp.longExchange,
@@ -169,6 +169,8 @@ export class DatabaseService {
         opp.shortRate,
         opp.spreadRate,
         opp.annualizedReturn,
+        opp.nextFundingTime,
+        opp.fundingPeriodHours ?? null,
         opp.longPrice,
         opp.shortPrice,
         opp.priceDiff,
@@ -192,9 +194,9 @@ export class DatabaseService {
 
       const sql = `INSERT INTO arbitrage_opportunities
         (symbol, long_exchange, short_exchange, long_rate, short_rate,
-         spread_rate, annualized_return, long_price, short_price,
-         price_diff, price_spread_percent, confidence, detected_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+         spread_rate, annualized_return, next_funding_time, funding_period_hours,
+         long_price, short_price, price_diff, price_spread_percent, confidence, detected_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
       let count = 0;
       for (const opp of opportunities) {
@@ -206,6 +208,8 @@ export class DatabaseService {
           opp.shortRate,
           opp.spreadRate,
           opp.annualizedReturn,
+          opp.nextFundingTime,
+          opp.fundingPeriodHours,
           opp.longPrice,
           opp.shortPrice,
           opp.priceDiff,

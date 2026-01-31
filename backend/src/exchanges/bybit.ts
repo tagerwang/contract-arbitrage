@@ -86,6 +86,7 @@ export class BybitAPI {
           symbol: data.symbol,
           fundingRate: parseFloat(data.fundingRate),
           fundingTime: parseInt(data.nextFundingTime),
+          fundingIntervalHours: parseInt(data.fundingIntervalHour, 10) || 8,
           markPrice: parseFloat(data.markPrice),
           indexPrice: parseFloat(data.indexPrice),
           timestamp: Date.now()

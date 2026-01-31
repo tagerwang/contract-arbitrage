@@ -25,6 +25,8 @@ export interface FundingRate {
   symbol: string;               // 交易对 (如 BTCUSDT)
   fundingRate: number;          // 资金费率 (小数形式，如 0.0001)
   fundingTime: number;          // 下次结算时间戳
+  /** 资金费率结算周期（小时），如 8 表示每 8 小时结算一次 */
+  fundingIntervalHours?: number;
   markPrice?: number;           // 标记价格
   indexPrice?: number;          // 指数价格
   timestamp: number;            // 数据时间戳
@@ -71,6 +73,10 @@ export interface ArbitrageOpportunity {
   shortRate: number;
   spreadRate: number;
   annualizedReturn: number;
+  /** 下次资金费率结算时间戳（毫秒） */
+  nextFundingTime: number;
+  /** 资金费率结算周期（小时），1/4/8 等；无值时年化计算默认用 8 */
+  fundingPeriodHours?: number | null;
   longPrice: number;
   shortPrice: number;
   priceDiff: number;
@@ -107,6 +113,10 @@ export interface ArbitrageRecord {
   short_rate: number;
   spread_rate: number;
   annualized_return: number;
+  /** 下次资金费率结算时间戳（毫秒） */
+  next_funding_time: number;
+  /** 资金费率结算周期（小时），1/4/8 等；无值时年化计算默认用 8 */
+  funding_period_hours?: number | null;
   long_price: number;
   short_price: number;
   price_diff: number;
