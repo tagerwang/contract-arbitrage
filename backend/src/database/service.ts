@@ -1,51 +1,55 @@
-import { Pool, PoolClient } from 'pg';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+import mysql from 'mysql2/promise';
+import type { Pool } from 'mysql2/promise';
 import {
   FundingRateRecord,
   ArbitrageRecord,
-  PriceRecord,
   Statistics,
   QueryFilter,
   ArbitrageOpportunity
 } from '../types';
 
 /**
- * 数据库服务类
+ * 数据库服务类（MySQL 8）
  */
 export class DatabaseService {
   private pool: Pool;
 
-  constructor(config?: any) {
-    this.pool = new Pool(config || {
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5432'),
-      database: process.env.DB_NAME || 'arbitrage_db',
-      user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'postgres',
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
-    });
-
-    this.pool.on('error', (err) => {
-      console.error('Unexpected database error:', err);
-    });
+  constructor(config?: mysql.PoolOptions) {
+    this.pool = mysql.createPool(
+      config || {
+        host: process.env.DB_HOST || 'localhost',
+        port: parseInt(process.env.DB_PORT || '3306', 10),
+        database: process.env.DB_NAME || 'arbitrage_db',
+        user: process.env.DB_USER || 'root',
+        password: process.env.DB_PASSWORD || '',
+        waitForConnections: true,
+        connectionLimit: 20,
+        queueLimit: 0,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 0,
+      }
+    );
   }
 
   /**
    * 测试数据库连接
    */
   async testConnection(): Promise<boolean> {
-    let client: PoolClient | null = null;
     try {
-      client = await this.pool.connect();
-      const result = await client.query('SELECT NOW()');
-      console.log('✓ Database connected successfully:', result.rows[0].now);
+      const [rows] = await this.pool.query<mysql.RowDataPacket[]>('SELECT NOW() AS now');
+      const row = Array.isArray(rows) ? rows[0] : rows;
+      console.log('✓ Database connected successfully:', row?.now);
       return true;
     } catch (error) {
-      console.error('✗ Database connection failed:', error instanceof Error ? error.message : String(error));
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('✗ Database connection failed:', msg || '(无详情)');
+      console.error('  请检查 .env 中 DB_HOST、DB_PORT、DB_NAME、DB_USER、DB_PASSWORD（MySQL 8）');
+      console.error('  若未初始化数据库，请先执行: npm run db:init');
       return false;
-    } finally {
-      if (client) client.release();
     }
   }
 
@@ -62,30 +66,21 @@ export class DatabaseService {
    * 保存资金费率记录
    */
   async saveFundingRate(rate: FundingRateRecord): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      const query = `
-        INSERT INTO funding_rates 
-        (exchange, symbol, funding_rate, funding_time, mark_price, index_price, recorded_at)
-        VALUES ($1, $2, $3, to_timestamp($4/1000.0), $5, $6, $7)
-        RETURNING id
-      `;
-      
-      const values = [
+    const [result] = await this.pool.query<mysql.ResultSetHeader>(
+      `INSERT INTO funding_rates 
+       (exchange, symbol, funding_rate, funding_time, mark_price, index_price, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
         rate.exchange,
         rate.symbol,
         rate.funding_rate,
-        rate.funding_time,
-        rate.mark_price,
-        rate.index_price,
-        rate.recorded_at || new Date()
-      ];
-
-      const result = await client.query(query, values);
-      return result.rows[0].id;
-    } finally {
-      client.release();
-    }
+        new Date(rate.funding_time),
+        rate.mark_price ?? null,
+        rate.index_price ?? null,
+        rate.recorded_at || new Date(),
+      ]
+    );
+    return result.insertId;
   }
 
   /**
@@ -94,54 +89,47 @@ export class DatabaseService {
   async saveFundingRatesBatch(rates: FundingRateRecord[]): Promise<number> {
     if (rates.length === 0) return 0;
 
-    const client = await this.pool.connect();
+    const conn = await this.pool.getConnection();
     try {
-      await client.query('BEGIN');
+      await conn.beginTransaction();
 
-      const query = `
-        INSERT INTO funding_rates 
+      const sql = `INSERT INTO funding_rates 
         (exchange, symbol, funding_rate, funding_time, mark_price, index_price, recorded_at)
-        VALUES ($1, $2, $3, to_timestamp($4/1000.0), $5, $6, $7)
-      `;
+        VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
       let count = 0;
       for (const rate of rates) {
-        const values = [
+        await conn.query(sql, [
           rate.exchange,
           rate.symbol,
           rate.funding_rate,
-          rate.funding_time,
-          rate.mark_price,
-          rate.index_price,
-          rate.recorded_at || new Date()
-        ];
-        await client.query(query, values);
+          new Date(rate.funding_time),
+          rate.mark_price ?? null,
+          rate.index_price ?? null,
+          rate.recorded_at || new Date(),
+        ]);
         count++;
       }
 
-      await client.query('COMMIT');
+      await conn.commit();
       return count;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await conn.rollback();
       throw error instanceof Error ? error : new Error(String(error));
     } finally {
-      client.release();
+      conn.release();
     }
   }
-
 
   /**
    * 获取最新资金费率
    */
   async getLatestFundingRates(limit: number = 100): Promise<FundingRateRecord[]> {
-    const query = `
-      SELECT * FROM funding_rates
-      ORDER BY recorded_at DESC
-      LIMIT $1
-    `;
-    
-    const result = await this.pool.query(query, [limit]);
-    return result.rows;
+    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+      'SELECT * FROM funding_rates ORDER BY recorded_at DESC LIMIT ?',
+      [limit]
+    );
+    return (Array.isArray(rows) ? rows : []) as FundingRateRecord[];
   }
 
   /**
@@ -152,15 +140,13 @@ export class DatabaseService {
     exchange: string,
     hours: number = 24
   ): Promise<FundingRateRecord[]> {
-    const query = `
-      SELECT * FROM funding_rates
-      WHERE symbol = $1 AND exchange = $2
-        AND recorded_at >= NOW() - INTERVAL '${hours} hours'
-      ORDER BY recorded_at DESC
-    `;
-    
-    const result = await this.pool.query(query, [symbol, exchange]);
-    return result.rows;
+    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+      `SELECT * FROM funding_rates 
+       WHERE symbol = ? AND exchange = ? AND recorded_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+       ORDER BY recorded_at DESC`,
+      [symbol, exchange, hours]
+    );
+    return (Array.isArray(rows) ? rows : []) as FundingRateRecord[];
   }
 
   // ==================== 套利机会相关 ====================
@@ -169,18 +155,13 @@ export class DatabaseService {
    * 保存套利机会
    */
   async saveArbitrageOpportunity(opp: ArbitrageOpportunity): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      const query = `
-        INSERT INTO arbitrage_opportunities
-        (symbol, long_exchange, short_exchange, long_rate, short_rate,
-         spread_rate, annualized_return, long_price, short_price,
-         price_diff, price_spread_percent, confidence, detected_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        RETURNING id
-      `;
-
-      const values = [
+    const [result] = await this.pool.query<mysql.ResultSetHeader>(
+      `INSERT INTO arbitrage_opportunities
+       (symbol, long_exchange, short_exchange, long_rate, short_rate,
+        spread_rate, annualized_return, long_price, short_price,
+        price_diff, price_spread_percent, confidence, detected_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
         opp.symbol,
         opp.longExchange,
         opp.shortExchange,
@@ -193,14 +174,10 @@ export class DatabaseService {
         opp.priceDiff,
         opp.priceSpreadPercent,
         opp.confidence,
-        opp.createdAt || new Date()
-      ];
-
-      const result = await client.query(query, values);
-      return result.rows[0].id;
-    } finally {
-      client.release();
-    }
+        opp.createdAt || new Date(),
+      ]
+    );
+    return result.insertId;
   }
 
   /**
@@ -209,21 +186,19 @@ export class DatabaseService {
   async saveArbitrageOpportunitiesBatch(opportunities: ArbitrageOpportunity[]): Promise<number> {
     if (opportunities.length === 0) return 0;
 
-    const client = await this.pool.connect();
+    const conn = await this.pool.getConnection();
     try {
-      await client.query('BEGIN');
+      await conn.beginTransaction();
 
-      const query = `
-        INSERT INTO arbitrage_opportunities
+      const sql = `INSERT INTO arbitrage_opportunities
         (symbol, long_exchange, short_exchange, long_rate, short_rate,
          spread_rate, annualized_return, long_price, short_price,
          price_diff, price_spread_percent, confidence, detected_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      `;
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
       let count = 0;
       for (const opp of opportunities) {
-        const values = [
+        await conn.query(sql, [
           opp.symbol,
           opp.longExchange,
           opp.shortExchange,
@@ -236,19 +211,18 @@ export class DatabaseService {
           opp.priceDiff,
           opp.priceSpreadPercent,
           opp.confidence,
-          opp.createdAt || new Date()
-        ];
-        await client.query(query, values);
+          opp.createdAt || new Date(),
+        ]);
         count++;
       }
 
-      await client.query('COMMIT');
+      await conn.commit();
       return count;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await conn.rollback();
       throw error instanceof Error ? error : new Error(String(error));
     } finally {
-      client.release();
+      conn.release();
     }
   }
 
@@ -256,58 +230,50 @@ export class DatabaseService {
    * 获取最新套利机会
    */
   async getLatestOpportunities(limit: number = 50): Promise<ArbitrageRecord[]> {
-    const query = `
-      SELECT * FROM arbitrage_opportunities
-      ORDER BY detected_at DESC
-      LIMIT $1
-    `;
-    
-    const result = await this.pool.query(query, [limit]);
-    return result.rows;
+    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(
+      'SELECT * FROM arbitrage_opportunities ORDER BY detected_at DESC LIMIT ?',
+      [limit]
+    );
+    return (Array.isArray(rows) ? rows : []) as ArbitrageRecord[];
   }
 
   /**
    * 根据条件查询套利机会
    */
   async queryOpportunities(filter: QueryFilter): Promise<ArbitrageRecord[]> {
-    let query = 'SELECT * FROM arbitrage_opportunities WHERE 1=1';
-    const params: any[] = [];
-    let paramIndex = 1;
+    let sql = 'SELECT * FROM arbitrage_opportunities WHERE 1=1';
+    const params: (string | number | Date | undefined)[] = [];
 
     if (filter.symbol) {
-      query += ` AND symbol = $${paramIndex++}`;
+      sql += ' AND symbol = ?';
       params.push(filter.symbol);
     }
-
     if (filter.minSpread !== undefined) {
-      query += ` AND spread_rate >= $${paramIndex++}`;
+      sql += ' AND spread_rate >= ?';
       params.push(filter.minSpread);
     }
-
     if (filter.startTime) {
-      query += ` AND detected_at >= $${paramIndex++}`;
+      sql += ' AND detected_at >= ?';
       params.push(filter.startTime);
     }
-
     if (filter.endTime) {
-      query += ` AND detected_at <= $${paramIndex++}`;
+      sql += ' AND detected_at <= ?';
       params.push(filter.endTime);
     }
 
-    query += ' ORDER BY detected_at DESC';
+    sql += ' ORDER BY detected_at DESC';
 
-    if (filter.limit) {
-      query += ` LIMIT $${paramIndex++}`;
+    if (filter.limit !== undefined) {
+      sql += ' LIMIT ?';
       params.push(filter.limit);
     }
-
-    if (filter.offset) {
-      query += ` OFFSET $${paramIndex++}`;
+    if (filter.offset !== undefined) {
+      sql += ' OFFSET ?';
       params.push(filter.offset);
     }
 
-    const result = await this.pool.query(query, params);
-    return result.rows;
+    const [rows] = await this.pool.query<mysql.RowDataPacket[]>(sql, params);
+    return (Array.isArray(rows) ? rows : []) as ArbitrageRecord[];
   }
 
   // ==================== 统计分析 ====================
@@ -316,67 +282,51 @@ export class DatabaseService {
    * 获取统计数据
    */
   async getStatistics(hours: number = 24): Promise<Statistics> {
-    const client = await this.pool.connect();
+    const conn = await this.pool.getConnection();
     try {
-      // 总机会数
-      const totalQuery = `
-        SELECT COUNT(*) as total
-        FROM arbitrage_opportunities
-        WHERE detected_at >= NOW() - INTERVAL '${hours} hours'
-      `;
-      const totalResult = await client.query(totalQuery);
-      const totalOpportunities = parseInt(totalResult.rows[0].total);
+      const [totalRows] = await conn.query<mysql.RowDataPacket[]>(
+        `SELECT COUNT(*) AS total FROM arbitrage_opportunities 
+         WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+        [hours]
+      );
+      const totalOpportunities = parseInt((Array.isArray(totalRows) ? totalRows[0] : totalRows)?.total ?? '0', 10);
 
-      // 平均费差和年化收益
-      const avgQuery = `
-        SELECT 
-          AVG(spread_rate) as avg_spread,
-          AVG(annualized_return) as avg_return
-        FROM arbitrage_opportunities
-        WHERE detected_at >= NOW() - INTERVAL '${hours} hours'
-      `;
-      const avgResult = await client.query(avgQuery);
-      const avgSpread = parseFloat(avgResult.rows[0].avg_spread) || 0;
-      const avgAnnualizedReturn = parseFloat(avgResult.rows[0].avg_return) || 0;
+      const [avgRows] = await conn.query<mysql.RowDataPacket[]>(
+        `SELECT AVG(spread_rate) AS avg_spread, AVG(annualized_return) AS avg_return
+         FROM arbitrage_opportunities 
+         WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)`,
+        [hours]
+      );
+      const ar = Array.isArray(avgRows) ? avgRows[0] : avgRows;
+      const avgSpread = parseFloat(ar?.avg_spread) || 0;
+      const avgAnnualizedReturn = parseFloat(ar?.avg_return) || 0;
 
-      // 热门交易对
-      const topSymbolsQuery = `
-        SELECT 
-          symbol,
-          COUNT(*) as count,
-          AVG(spread_rate) as avg_spread
-        FROM arbitrage_opportunities
-        WHERE detected_at >= NOW() - INTERVAL '${hours} hours'
-        GROUP BY symbol
-        ORDER BY count DESC
-        LIMIT 10
-      `;
-      const topSymbolsResult = await client.query(topSymbolsQuery);
-      const topSymbols = topSymbolsResult.rows.map(row => ({
+      const [topSymbolsRows] = await conn.query<mysql.RowDataPacket[]>(
+        `SELECT symbol, COUNT(*) AS count, AVG(spread_rate) AS avg_spread
+         FROM arbitrage_opportunities 
+         WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+         GROUP BY symbol ORDER BY count DESC LIMIT 10`,
+        [hours]
+      );
+      const topSymbols = (Array.isArray(topSymbolsRows) ? topSymbolsRows : []).map((row) => ({
         symbol: row.symbol,
-        count: parseInt(row.count),
-        avgSpread: parseFloat(row.avg_spread)
+        count: parseInt(row.count, 10),
+        avgSpread: parseFloat(row.avg_spread),
       }));
 
-      // 交易所配对统计
-      const exchangePairsQuery = `
-        SELECT 
-          long_exchange,
-          short_exchange,
-          COUNT(*) as count,
-          AVG(spread_rate) as avg_spread
-        FROM arbitrage_opportunities
-        WHERE detected_at >= NOW() - INTERVAL '${hours} hours'
-        GROUP BY long_exchange, short_exchange
-        ORDER BY count DESC
-        LIMIT 10
-      `;
-      const exchangePairsResult = await client.query(exchangePairsQuery);
-      const exchangePairs = exchangePairsResult.rows.map(row => ({
-        longExchange: row.long_exchange,
-        shortExchange: row.short_exchange,
-        count: parseInt(row.count),
-        avgSpread: parseFloat(row.avg_spread)
+      const [exchangePairsRows] = await conn.query<mysql.RowDataPacket[]>(
+        `SELECT long_exchange AS longExchange, short_exchange AS shortExchange,
+                COUNT(*) AS count, AVG(spread_rate) AS avg_spread
+         FROM arbitrage_opportunities 
+         WHERE detected_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+         GROUP BY long_exchange, short_exchange ORDER BY count DESC LIMIT 10`,
+        [hours]
+      );
+      const exchangePairs = (Array.isArray(exchangePairsRows) ? exchangePairsRows : []).map((row) => ({
+        longExchange: row.longExchange,
+        shortExchange: row.shortExchange,
+        count: parseInt(row.count, 10),
+        avgSpread: parseFloat(row.avg_spread),
       }));
 
       return {
@@ -384,10 +334,10 @@ export class DatabaseService {
         avgSpread,
         avgAnnualizedReturn,
         topSymbols,
-        exchangePairs
+        exchangePairs,
       };
     } finally {
-      client.release();
+      conn.release();
     }
   }
 
@@ -395,17 +345,11 @@ export class DatabaseService {
    * 清理旧数据
    */
   async cleanOldData(days: number = 30): Promise<number> {
-    const client = await this.pool.connect();
-    try {
-      const query = `
-        DELETE FROM arbitrage_opportunities
-        WHERE detected_at < NOW() - INTERVAL '${days} days'
-      `;
-      const result = await client.query(query);
-      return result.rowCount || 0;
-    } finally {
-      client.release();
-    }
+    const [result] = await this.pool.query<mysql.ResultSetHeader>(
+      'DELETE FROM arbitrage_opportunities WHERE detected_at < DATE_SUB(NOW(), INTERVAL ? DAY)',
+      [days]
+    );
+    return result.affectedRows || 0;
   }
 }
 

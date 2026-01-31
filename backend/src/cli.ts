@@ -1,12 +1,13 @@
 import dotenv from 'dotenv';
 import DatabaseService from './database/service';
 import ArbitrageEngine from './arbitrage/engine';
+import ApiServer from './server';
 
 // 加载环境变量
 dotenv.config();
 
 /**
- * 命令行启动脚本
+ * 命令行启动脚本（同时启动套利监控 + HTTP API 服务器）
  */
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
@@ -24,6 +25,10 @@ async function main() {
     console.error('Please check your database configuration in .env file');
     process.exit(1);
   }
+
+  // 启动 HTTP API 服务器（提供 /api/statistics 等接口）
+  const apiServer = new ApiServer();
+  await apiServer.start();
 
   // 初始化套利引擎
   const engine = new ArbitrageEngine(db);

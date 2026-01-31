@@ -50,8 +50,10 @@ export class ApiServer {
    * 设置路由
    */
   private setupRoutes(): void {
-    // API路由
+    // API 路由（带 /api 前缀）
     this.app.use('/api', statsRouter);
+    // 无前缀路由（/opportunities、/statistics 等也可直接访问）
+    this.app.use('/', statsRouter);
 
     // 根路径
     this.app.get('/', (req: Request, res: Response) => {
