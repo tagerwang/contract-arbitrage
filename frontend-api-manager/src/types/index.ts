@@ -18,7 +18,7 @@ export interface ApiParameter {
   type: ParamType;
   required?: boolean;
   optional?: boolean;
-  default?: string | number;
+  default?: string | number | boolean;
   description?: string;
 }
 
@@ -128,6 +128,10 @@ export interface ParamEditorProps {
   params: ApiParameter[];
   values: Record<string, string>;
   onChange: (name: string, value: string) => void;
+  /** 交易对选项，用于 symbol 参数的 Select */
+  symbolOptions?: { label: string; value: string }[];
+  /** symbol 参数是否加载中 */
+  symbolsLoading?: boolean;
 }
 
 /**

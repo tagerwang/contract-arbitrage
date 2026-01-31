@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import DatabaseService from '../database/service';
 import { QueryFilter } from '../types';
+import { computeRealtimeOpportunities } from '../arbitrage/realtime';
 
 const router = Router();
 const db = new DatabaseService();
@@ -8,6 +9,8 @@ const db = new DatabaseService();
 /**
  * GET /api/opportunities
  * 获取套利机会列表
+ * - 默认优先查数据库；若为空则实时从交易所计算
+ * - ?realtime=1 强制实时计算
  */
 router.get('/opportunities', async (req: Request, res: Response) => {
   try {
@@ -17,8 +20,17 @@ router.get('/opportunities', async (req: Request, res: Response) => {
       limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
       offset: req.query.offset ? parseInt(req.query.offset as string) : 0
     };
+    const forceRealtime = req.query.realtime === '1' || req.query.realtime === 'true';
 
-    const opportunities = await db.queryOpportunities(filter);
+    let opportunities = await db.queryOpportunities(filter);
+    if (forceRealtime || opportunities.length === 0) {
+      opportunities = await computeRealtimeOpportunities({
+        symbol: filter.symbol,
+        minSpread: filter.minSpread ?? 0.01,
+        limit: filter.limit ?? 50,
+        offset: filter.offset ?? 0
+      });
+    }
 
     res.json({
       success: true,
@@ -37,11 +49,18 @@ router.get('/opportunities', async (req: Request, res: Response) => {
 /**
  * GET /api/opportunities/latest
  * 获取最新套利机会
+ * - 默认优先查数据库；若为空则实时从交易所计算
+ * - ?realtime=1 强制实时计算
  */
 router.get('/opportunities/latest', async (req: Request, res: Response) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 20;
-    const opportunities = await db.getLatestOpportunities(limit);
+    const forceRealtime = req.query.realtime === '1' || req.query.realtime === 'true';
+
+    let opportunities = await db.getLatestOpportunities(limit);
+    if (forceRealtime || opportunities.length === 0) {
+      opportunities = await computeRealtimeOpportunities({ limit });
+    }
 
     res.json({
       success: true,

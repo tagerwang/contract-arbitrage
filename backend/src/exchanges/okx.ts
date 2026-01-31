@@ -88,25 +88,62 @@ export class OKXAPI {
   }
 
   /**
+   * 获取 USDT 永续合约的 instId 列表
+   * OKX funding-rate 接口必须传 instId，不支持仅传 instType
+   */
+  private async getUSDTSwapInstIds(): Promise<string[]> {
+    const response = await this.client.get('/api/v5/public/instruments', {
+      params: { instType: 'SWAP' }
+    });
+    if (response.data.code !== '0') {
+      throw new Error(response.data.msg);
+    }
+    const data = response.data.data as Array<{ instId: string; settleCcy?: string }>;
+    return data
+      .filter((d) => d.instId.endsWith('-USDT-SWAP') && !d.instId.includes('_UM'))
+      .map((d) => d.instId);
+  }
+
+  /**
    * 批量获取所有交易对的资金费率
+   * OKX 需先获取 instruments 列表，再逐个请求 funding-rate（接口强制要求 instId）
+   * 使用并发分批请求以控制速率
    */
   async getAllFundingRates(): Promise<FundingRate[]> {
     try {
-      const response = await this.client.get('/api/v5/public/funding-rate', {
-        params: { instType: 'SWAP' }
-      });
+      const instIds = await this.getUSDTSwapInstIds();
+      const concurrency = 10;
+      const delayMs = 120; // ~8 req/s，留余量避免限流
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-      if (response.data.code !== '0') {
-        throw new Error(response.data.msg);
+      const fetchOne = async (instId: string): Promise<FundingRate | null> => {
+        try {
+          const response = await this.client.get('/api/v5/public/funding-rate', {
+            params: { instId }
+          });
+          if (response.data.code !== '0') return null;
+          const data = response.data.data?.[0];
+          if (!data) return null;
+          return {
+            exchange: Exchange.OKX,
+            symbol: this.denormalizeSymbol(data.instId),
+            fundingRate: parseFloat(data.fundingRate),
+            fundingTime: parseInt(data.nextFundingTime),
+            timestamp: parseInt(data.fundingTime)
+          };
+        } catch {
+          return null;
+        }
+      };
+
+      const results: FundingRate[] = [];
+      for (let i = 0; i < instIds.length; i += concurrency) {
+        const batch = instIds.slice(i, i + concurrency);
+        const batchResults = await Promise.all(batch.map(fetchOne));
+        results.push(...(batchResults.filter((r): r is FundingRate => r !== null)));
+        if (i + concurrency < instIds.length) await sleep(delayMs);
       }
-
-      return response.data.data.map((data: any) => ({
-        exchange: Exchange.OKX,
-        symbol: this.denormalizeSymbol(data.instId),
-        fundingRate: parseFloat(data.fundingRate),
-        fundingTime: parseInt(data.nextFundingTime),
-        timestamp: parseInt(data.fundingTime)
-      }));
+      return results;
     } catch (error) {
       throw new Error(`OKX getAllFundingRates error: ${error instanceof Error ? error.message : String(error)}`);
     }

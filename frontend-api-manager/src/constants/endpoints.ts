@@ -13,6 +13,12 @@ export const API_ENDPOINTS: ApiEndpoint[] = [
     category: '套利机会',
     description: '根据条件查询套利机会列表，支持按交易对、最小费差等条件筛选',
     params: [
+    {
+        name: 'realtime',
+        type: 'boolean',
+        default: true,
+        description: '是否实时计算'
+      },
       {
         name: 'symbol',
         type: 'string',

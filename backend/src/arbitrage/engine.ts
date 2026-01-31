@@ -1,21 +1,13 @@
-import BinanceAPI from '../exchanges/binance';
-import OKXAPI from '../exchanges/okx';
-import BybitAPI from '../exchanges/bybit';
 import DatabaseService from '../database/service';
-import {
-  Exchange,
-  FundingRate,
-  ArbitrageOpportunity,
-  SymbolConfig
-} from '../types';
+import { FundingRate, ArbitrageOpportunity } from '../types';
+import type { FundingRateRecord } from '../types';
+import { fetchAllExchangesFundingRates } from './fundingRatesFetcher';
 
 /**
  * 套利引擎
+ * 从三个交易所获取所有合约交易对资金费率（5 分钟缓存），取交集后分析套利机会
  */
 export class ArbitrageEngine {
-  private binance: BinanceAPI;
-  private okx: OKXAPI;
-  private bybit: BybitAPI;
   private db: DatabaseService;
   private running: boolean = false;
   private intervalId?: NodeJS.Timeout;
@@ -24,8 +16,7 @@ export class ArbitrageEngine {
   private config = {
     checkInterval: parseInt(process.env.CHECK_INTERVAL_MS || '5000'),
     minProfitThreshold: parseFloat(process.env.MIN_PROFIT_THRESHOLD || '0.3'),
-    maxPriceSpread: 0.5, // 最大价格差百分比
-    enabledSymbols: ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'DOGEUSDT']
+    maxPriceSpread: parseFloat(process.env.MAX_PRICE_SPREAD || '0.5')
   };
 
   // 统计数据
@@ -37,9 +28,6 @@ export class ArbitrageEngine {
   };
 
   constructor(db?: DatabaseService) {
-    this.binance = new BinanceAPI();
-    this.okx = new OKXAPI();
-    this.bybit = new BybitAPI();
     this.db = db || new DatabaseService();
   }
 
@@ -55,7 +43,7 @@ export class ArbitrageEngine {
     console.log('🚀 Starting Arbitrage Engine...');
     console.log(`⚙ Check interval: ${this.config.checkInterval}ms`);
     console.log(`⚙ Min profit threshold: ${this.config.minProfitThreshold}%`);
-    console.log(`⚙ Monitoring symbols: ${this.config.enabledSymbols.join(', ')}`);
+    console.log('⚙ Symbols: intersection of Binance, OKX, Bybit (no fixed list)');
 
     this.running = true;
 
@@ -90,6 +78,9 @@ export class ArbitrageEngine {
 
   /**
    * 检查套利机会
+   * 1. 分别调用三个交易所的 getAllFundingRates（一次请求，节省权重）
+   * 2. 过滤出在三个交易所都存在的交易对
+   * 3. 对交集交易对分析套利机会
    */
   private async checkArbitrageOpportunities(): Promise<void> {
     const startTime = Date.now();
@@ -98,32 +89,59 @@ export class ArbitrageEngine {
     try {
       console.log(`\n[${new Date().toLocaleTimeString()}] 🔍 Checking arbitrage opportunities...`);
 
+      const [binanceRates, okxRates, bybitRates] = await fetchAllExchangesFundingRates({
+        skipCache: false,
+        silent: false
+      });
+
+      const bnSymbols = new Set(binanceRates.map((r) => r.symbol));
+      const okxSymbols = new Set(okxRates.map((r) => r.symbol));
+      const bybitSymbols = new Set(bybitRates.map((r) => r.symbol));
+
+      const commonSymbols = [...bnSymbols].filter((s) => okxSymbols.has(s) && bybitSymbols.has(s));
+      console.log(`  📋 Common symbols (3 exchanges): ${commonSymbols.length}`);
+
+      const rateMap = new Map<string, FundingRate[]>();
+      for (const r of [...binanceRates, ...okxRates, ...bybitRates]) {
+        if (!commonSymbols.includes(r.symbol)) continue;
+        if (!rateMap.has(r.symbol)) rateMap.set(r.symbol, []);
+        rateMap.get(r.symbol)!.push(r);
+      }
+
       const opportunities: ArbitrageOpportunity[] = [];
-
-      // 并发获取所有交易所的资金费率
-      for (const symbol of this.config.enabledSymbols) {
-        try {
-          const rates = await this.fetchAllFundingRates(symbol);
-          
-          // 保存资金费率到数据库
-          if (rates.length > 0) {
-            await this.saveFundingRates(rates);
-          }
-
-          // 分析套利机会
-          const opps = this.analyzeFundingRates(rates);
-          opportunities.push(...opps);
-
-        } catch (error) {
-          console.error(`  ✗ Error processing ${symbol}:`, error instanceof Error ? error.message : String(error));
-          this.stats.errors++;
+      for (const rates of rateMap.values()) {
+        if (rates.length >= 2) {
+          opportunities.push(...this.analyzeFundingRates(rates));
         }
       }
 
-      // 保存发现的套利机会
+      opportunities.sort((a, b) => b.spreadRate - a.spreadRate);
+
+      // 保存套利机会及其对应的资金费率到数据库
       if (opportunities.length > 0) {
         await this.saveOpportunities(opportunities);
         this.stats.opportunitiesFound += opportunities.length;
+
+        const oppSymbols = new Set(opportunities.map((o) => o.symbol));
+        const ratesToSave: FundingRateRecord[] = [];
+        for (const symbol of oppSymbols) {
+          const rates = rateMap.get(symbol) ?? [];
+          for (const r of rates) {
+            ratesToSave.push({
+              exchange: r.exchange as string,
+              symbol: r.symbol,
+              funding_rate: r.fundingRate,
+              funding_time: r.fundingTime,
+              mark_price: r.markPrice,
+              index_price: r.indexPrice,
+              recorded_at: new Date()
+            });
+          }
+        }
+        if (ratesToSave.length > 0) {
+          await this.db.saveFundingRatesBatch(ratesToSave);
+          console.log(`  💾 Saved ${ratesToSave.length} funding rates for ${oppSymbols.size} symbols`);
+        }
 
         console.log(`\n✓ Found ${opportunities.length} arbitrage opportunities:`);
         opportunities.forEach(opp => {
@@ -143,20 +161,6 @@ export class ArbitrageEngine {
     }
   }
 
-
-  /**
-   * 获取所有交易所的资金费率
-   */
-  private async fetchAllFundingRates(symbol: string): Promise<FundingRate[]> {
-    const promises = [
-      this.binance.getFundingRate(symbol).catch(e => null),
-      this.okx.getFundingRate(symbol).catch(e => null),
-      this.bybit.getFundingRate(symbol).catch(e => null)
-    ];
-
-    const results = await Promise.all(promises);
-    return results.filter(r => r !== null) as FundingRate[];
-  }
 
   /**
    * 分析资金费率并找出套利机会
@@ -242,24 +246,7 @@ export class ArbitrageEngine {
   }
 
   /**
-   * 保存资金费率到数据库
-   */
-  private async saveFundingRates(rates: FundingRate[]): Promise<void> {
-    const records = rates.map(rate => ({
-      exchange: rate.exchange,
-      symbol: rate.symbol,
-      funding_rate: rate.fundingRate,
-      funding_time: rate.fundingTime,
-      mark_price: rate.markPrice,
-      index_price: rate.indexPrice,
-      recorded_at: new Date()
-    }));
-
-    await this.db.saveFundingRatesBatch(records);
-  }
-
-  /**
-   * 保存套利机会到数据库
+   * 保存套利机会到数据库（资金费率不再入库）
    */
   private async saveOpportunities(opportunities: ArbitrageOpportunity[]): Promise<void> {
     await this.db.saveArbitrageOpportunitiesBatch(opportunities);

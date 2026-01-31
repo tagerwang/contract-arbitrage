@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Play, Code, BookOpen, Settings } from 'lucide-react';
+import { Play, Code, BookOpen } from 'lucide-react';
 import axios from 'axios';
 import ParamEditor from './components/ParamEditor';
+import { useAllSymbols } from './hooks/useAllSymbols';
 import ResponseViewer from './components/ResponseViewer';
 import CodeGenerator from './components/CodeGenerator';
 import { API_ENDPOINTS, ENDPOINTS_BY_CATEGORY, CATEGORIES, METHOD_COLORS } from './constants/endpoints';
@@ -12,7 +13,7 @@ import './App.css';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
 function App() {
-  // 状态管理
+  const { options: symbolOptions, loading: symbolsLoading } = useAllSymbols();
   const [selectedEndpoint, setSelectedEndpoint] = useState<ApiEndpoint>(API_ENDPOINTS[0]);
   const [params, setParams] = useState<Record<string, string>>({});
   const [response, setResponse] = useState<ApiResponse | null>(null);
@@ -378,6 +379,8 @@ function App() {
                         params={selectedEndpoint.params}
                         values={params}
                         onChange={handleParamChange}
+                        symbolOptions={symbolOptions}
+                        symbolsLoading={symbolsLoading}
                       />
                     </div>
 
