@@ -16,7 +16,7 @@ export interface APIEndpoint {
   endpoint: string;
   description: string;
   params: APIParam[];
-  response: Record<string, unknown>;
+  response: Record<string, unknown> | unknown[];
   websocket: string | null;
 }
 

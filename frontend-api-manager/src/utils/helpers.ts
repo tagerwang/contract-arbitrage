@@ -203,9 +203,9 @@ export function generateCode(
 function toCamelCase(str: string): string {
   return str
     .replace(/[^\w\s]/g, '')
-    .replace(/\s(.)/g, (match, group1) => group1.toUpperCase())
+    .replace(/\s(.)/g, (_m, group1) => group1.toUpperCase())
     .replace(/\s/g, '')
-    .replace(/^(.)/, (match, group1) => group1.toLowerCase());
+    .replace(/^(.)/, (_m, group1) => group1.toLowerCase());
 }
 
 /**

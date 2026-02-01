@@ -10,6 +10,12 @@ build/
 # Environment
 .env
 .env.local
+.env.deploy.example
+
+# 实际域名 Nginx 配置（不提交，避免暴露）
+deploy/*.nginx.conf
+deploy/*.nginx.conf.example
+deploy/README.md
 
 # OS
 .DS_Store

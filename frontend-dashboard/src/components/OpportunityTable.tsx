@@ -1,6 +1,6 @@
 import React from 'react';
 import type { OpportunityTableProps } from '../types';
-import { formatPercent, formatRelativeTime, getExchangeColor, getConfidenceColor } from '../utils/format';
+import { formatPercent, formatRelativeTime, getConfidenceColor } from '../utils/format';
 
 /**
  * 机会表格组件

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Copy, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import type { ResponseViewerProps } from '../types';
-import { formatJson, copyToClipboard, formatDuration, getStatusText } from '../utils/helpers';
+import { formatJson, copyToClipboard, formatDuration } from '../utils/helpers';
 
 /**
  * 响应查看器组件
